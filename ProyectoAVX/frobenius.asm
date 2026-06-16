@@ -1,3 +1,10 @@
+.data
+    ; Máscara para valor absoluto en double (64 bits):
+    ; Se pone el bit de signo en 0 y el resto en 1.
+    ; 7FFFFFFFFFFFFFFFh = 0 111...111 en binario (64 bits)
+    sign_mask  DQ 07FFFFFFFFFFFFFFFh, 07FFFFFFFFFFFFFFFh, \
+                  07FFFFFFFFFFFFFFFh, 07FFFFFFFFFFFFFFFh
+
 .code
 
 ; Función: frobenius_distance
@@ -24,6 +31,39 @@ frobenius_distance PROC
     vsubpd ymm6, ymm0, ymm3    ; C[0..3]  = A[0..3]  - B[0..3]
     vsubpd ymm7, ymm1, ymm4    ; C[4..7]  = A[4..7]  - B[4..7]
     vsubpd ymm8, ymm2, ymm5    ; C[8..11] = A[8..11] - B[8..11]
+
+    
+    ; Valor absoluto con AND
+    vmovapd ymm15, YMMWORD PTR [sign_mask] ; Cargar máscara de signo
+ 
+    vandpd ymm6, ymm6, ymm15   ; |C[0..3]|
+    vandpd ymm7, ymm7, ymm15   ; |C[4..7]|
+    vandpd ymm8, ymm8, ymm15   ; |C[8..11]|
+
+
+    ; Suma de cuadrados con vmulpd + suma acumulada, cada elemento se eleva al cuadrado y luego se suman todos.
+
+    ; Elevar al cuadrado cada grupo (multiplicar cada elemento por sí mismo)
+    vmulpd ymm6, ymm6, ymm6    ; C[0..3]^2
+    vmulpd ymm7, ymm7, ymm7    ; C[4..7]^2
+    vmulpd ymm8, ymm8, ymm8    ; C[8..11]^2
+ 
+    ; Sumar los tres grupos en ymm6
+    vaddpd ymm6, ymm6, ymm7    ; ymm6 = C[0..3]^2 + C[4..7]^2
+    vaddpd ymm6, ymm6, ymm8    ; ymm6 = suma de los 12 elementos^2
+ 
+    ; Reducción horizontal: sumar los 4 doubles dentro de ymm6
+    ; ymm6 = [d0, d1, d2, d3]
+    ; Extraer la mitad alta (d2, d3) a xmm9
+    vextractf128 xmm9, ymm6, 1         ; xmm9 = [d2, d3]
+    vaddpd xmm6, xmm6, xmm9            ; xmm6 = [d0+d2, d1+d3]
+    vhaddpd xmm6, xmm6, xmm6           ; xmm6 = [d0+d1+d2+d3, ...]
+
+
+    ; Raíz cuadrada y retorno del resultado
+    ; Se usa vsqrtsd para calcular sqrt sobre un solo double.
+ 
+    vsqrtsd xmm0, xmm6, xmm6   ; xmm0 = sqrt(suma de cuadrados)
 
     ret
 frobenius_distance ENDP
